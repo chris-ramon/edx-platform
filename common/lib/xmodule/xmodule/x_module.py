@@ -8,9 +8,10 @@ from collections import namedtuple
 from pkg_resources import resource_listdir, resource_string, resource_isdir
 
 from xmodule.modulestore import inheritance, Location
-from xmodule.modulestore.exceptions import ItemNotFoundError, InsufficientSpecificationError
+from xmodule.modulestore.exceptions import ItemNotFoundError, InsufficientSpecificationError, InvalidLocationError
 
 from xblock.core import XBlock, Scope, String, Integer, Float, ModelType
+from xmodule.modulestore.locator import BlockUsageLocator
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,13 @@ class LocationField(ModelType):
         """
         Parse the json value as a Location
         """
-        return Location(value)
+        try:
+            return Location(value)
+        except InvalidLocationError:
+            if isinstance(value, BlockUsageLocator):
+                return value
+            else:
+                return BlockUsageLocator(value)
 
     def to_json(self, value):
         """
@@ -166,6 +173,10 @@ class XModule(XModuleFields, HTMLSnippet, XBlock):
             self.url_name = self.location.name
             if not hasattr(self, 'category'):
                 self.category = self.location.category
+        elif isinstance(self.location, BlockUsageLocator):
+            self.url_name = self.location.usage_id
+            if not hasattr(self, 'category'):
+                raise InsufficientSpecificationError()
         else:
             raise InsufficientSpecificationError()
         self._loaded_children = None
@@ -436,8 +447,17 @@ class XModuleDescriptor(XModuleFields, HTMLSnippet, ResourceTemplates, XBlock):
             self.url_name = self.location.name
             if not hasattr(self, 'category'):
                 self.category = self.location.category
+        elif isinstance(self.location, BlockUsageLocator):
+            self.url_name = self.location.usage_id
+            if not hasattr(self, 'category'):
+                raise InsufficientSpecificationError()
         else:
             raise InsufficientSpecificationError()
+        # update_version is the version which last updated this xblock v prev being the penultimate updater
+        # leaving off original_version since it complicates creation w/o any obv value yet and is computable
+        # by following previous until None
+        # definition_locator is only used by mongostores which separate definitions from blocks
+        self.edited_by = self.edited_on = self.previous_version = self.update_version = self.definition_locator = None
         self._child_instances = None
 
     @property
